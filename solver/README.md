@@ -63,6 +63,29 @@ python simple_solver.py --api-key "your-api-key-here"
 python simple_solver.py --base-url "http://your-server:8080/api/v1"
 ```
 
+### Logging Options
+
+The solver includes comprehensive logging:
+
+- **Console Logging**: Always enabled, shows INFO level messages
+- **File Logging**: Enabled by default, saves detailed logs to `logs/solver_YYYYMMDD_HHMMSS.log`
+
+```bash
+# Change log level (DEBUG, INFO, WARNING, ERROR)
+python simple_solver.py --log-level DEBUG
+
+# Disable file logging (only console)
+python simple_solver.py --no-log-file
+```
+
+Log files include:
+- API requests and responses
+- Decision making process (flight loads, purchases)
+- Round-by-round progress
+- Cost tracking
+- Error details and stack traces
+- Penalty information
+
 ## How It Works
 
 1. **Start Session**: Connects to the evaluation platform and starts a new session

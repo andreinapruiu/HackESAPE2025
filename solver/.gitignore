@@ -13,3 +13,7 @@ ENV/
 .env
 !.env.example
 
+# Log files
+logs/
+*.log
+
