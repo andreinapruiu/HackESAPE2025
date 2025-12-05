@@ -1,179 +1,95 @@
-# 🛫 ROTABLES CHALLENGE - COMPLETE GUIDE
+# HackITAll 2025 - Rotables Challenge: Hub-Spoke Logistics Optimization
 
-## 📖 Table of Contents
-1. [Challenge Overview](#challenge-overview)
-2. [The Problem](#the-problem)
-3. [Network Architecture](#network-architecture)
-4. [Kit Types & Costs](#kit-types--costs)
-5. [API Reference](#api-reference)
-6. [Cost Formulas](#cost-formulas)
-7. [Penalty System](#penalty-system)
-8. [Game Mechanics](#game-mechanics)
-9. [Data Files](#data-files)
-10. [Strategy Guide](#strategy-guide)
-11. [Getting Started](#getting-started)
+## 🎯 Project Overview
+
+This is an **airline logistics optimization challenge** where teams must minimize operational costs by efficiently managing passenger kits (rotables) across a **hub-and-spoke network**. The system simulates 30 days (720 hours) of airline operations where you must:
+
+- **Load kits** onto flights for each passenger class
+- **Purchase new kits** to replenish stock at HUB1
+- **Minimize total costs** (operational + penalties)
+- **Avoid penalties** for unfulfilled passengers, negative stock, or overloaded flights
 
 ---
 
-## 🎯 Challenge Overview
+## 📐 System Architecture
 
-**Goal:** Minimize total costs while managing passenger kits (rotables) across an airline hub-and-spoke network over 720 rounds (30 days × 24 hours).
+### **Core Entities**
 
-### Key Statistics
-- **160+ airports** in the network
-- **447 flights** in the schedule
-- **4 cabin classes** (First, Business, Premium Economy, Economy)
-- **720 game rounds** (30 days × 24 hours)
-- **1 central hub (HUB1)** + multiple outstation airports
+| Entity | Description |
+|--------|-------------|
+| **Airport** | Hub (HUB1) or outstation with storage capacity, processing costs/times, loading costs |
+| **Flight** | Connection between HUB↔Outstation with scheduled/actual times, passengers, aircraft |
+| **Kit Type** | 4 classes: FIRST (200€, 5kg, 48h lead), BUSINESS (150€, 3kg, 36h), PREMIUM_ECONOMY (100€, 2.5kg, 24h), ECONOMY (50€, 1.5kg, 12h) |
+| **Aircraft Type** | Defines kit capacity and cost per kg per km for each class |
+| **Evaluation Session** | Player's game session tracking current time, total cost, and state |
 
----
+### **Key Concepts**
 
-## 🧩 The Problem
-
-### What You Must Decide Each Round (Hour):
-
-1. **How many kits to load on each flight** (per class)
-2. **How many kits to purchase** for HUB1 replenishment (optional)
-3. **How to balance costs** between operations and penalties
-
-### What the Backend Calculates Automatically:
-
-- Kit deliveries and arrivals at destinations
-- All types of penalties
-- Costs for movements and purchases
-- Cumulative cost for entire session
-- Airport stock updates
-- Flight statuses (SCHEDULED, CHECKED_IN, LANDED)
+- **Hub-Spoke Network**: Central HUB1 connects to 160+ outstations. All flights are HUB↔Outstation or return.
+- **Turn-Based Simulation**: Progresses hour-by-hour. Each round = 1 simulated hour.
+- **Flight Events**: 
+  - `SCHEDULED` (24h before departure) - planned data
+  - `CHECKED_IN` (1h before departure) - actual passengers/aircraft confirmed
+  - `LANDED` (on arrival) - kits used, processing begins
+- **Kit Processing**: Used kits need processing time before becoming available again at destination airport.
 
 ---
 
-## 🌐 Network Architecture
+## 🔄 Game Mechanics Flow
 
-### Hub-and-Spoke Model
+### **Each Round (Hour) Execution Steps:**
 
-```
-         Outstation A1
-              ↑↓
-         Outstation A2
-              ↑↓
-    HUB1 ←→ Central Hub ←→ Outstation A3
-              ↑↓
-         Outstation A4
-              ↑↓
-         Outstation A5
-```
-
-### HUB1 (Central Hub)
-- **Only location** where you can purchase new kits
-- Fastest processing times (1-6 hours)
-- Lowest loading costs
-- Massive storage capacity
-- All aircraft are based here
-
-### Outstations (Satellite Airports)
-- **Limited support** - only turnaround operations
-- **Much longer processing times** (4-45 hours) ⚠️
-- Higher loading costs
-- Limited storage capacity
-- **Cannot purchase kits here**
-
-### ⚠️ CRITICAL INSIGHT:
-**Outstation processing times (4-45h) are MUCH LONGER than turnaround times (2-6h)**
-→ Kits from outbound flight CANNOT be used for return flight!
+1. **Validate Session/Time** - Verify session is active and time matches
+2. **Apply Flight Loads** - Create kit movements from your loading decisions (deduct from origin stock)
+3. **Process Purchasing Orders** - Add new kits to HUB1 (delivery after lead time)
+4. **Execute Kit Movements** - Apply all scheduled movements for current hour
+5. **Check Stock Boundaries** - Apply penalties for negative/over-capacity stock
+6. **Create Processing Movements** - Queue landed kits for processing (return to stock after processing time)
+7. **Advance Time** - Move to next hour
+8. **Prepare Flight Updates** - Return next round's flight events
 
 ---
 
-## 📦 Kit Types & Costs
+## 🌐 API Endpoints
 
-```
-Class              Weight (kg)  Cost ($)  Lead Time (hours)
-─────────────────────────────────────────────────────────────
-FIRST_CLASS        5.0          200       48
-BUSINESS           3.0          150       36
-PREMIUM_ECONOMY    2.5          100       24
-ECONOMY            1.5          50        12
-```
+### **Base URL:** `http://127.0.0.1:8080/api/v1/`
 
-### Important Notes:
-- Lead time = time until purchased kits arrive at HUB1
-- Kits are **identical** across all aircraft types
-- Each class has **dedicated storage** on aircraft (no sharing)
+### **Authentication:** All requests require header `API-KEY: <your-uuid>`
 
----
+| Method | Endpoint | Description | Request | Response |
+|--------|----------|-------------|---------|----------|
+| **POST** | `/session/start` | Start new session | Headers only | `UUID` (session ID) |
+| **POST** | `/session/end` | End active session | Headers only | `HourResponseDto` (final state) |
+| **POST** | `/play/round` | Submit round actions | `HourRequestDto` | `HourResponseDto` |
 
-## 🔌 API Reference
+### **POST /play/round - Main Gameplay Endpoint**
 
-### Base URL
-```
-http://localhost:8080/api/v1
-```
-
-### Authentication
-All endpoints require `API-KEY` header:
-```
-API-KEY: <your-uuid-from-teams.csv>
-```
-
----
-
-### 1. Start Session
-
-**Endpoint:** `POST /session/start`
-
-**Headers:**
-```
-API-KEY: <your-api-key>
-```
-
-**Response:**
-```json
-"550e8400-e29b-41d4-a716-446655440000"
-```
-(Returns session UUID as plain string)
-
-**Notes:**
-- Only one active session per API key
-- Must end previous session before starting new one
-
----
-
-### 2. Play Round
-
-**Endpoint:** `POST /play/round`
-
-**Headers:**
-```
-API-KEY: <your-api-key>
-SESSION-ID: <session-uuid>
-Content-Type: application/json
-```
-
-**Request Body:**
+**Request: `HourRequestDto`**
 ```json
 {
   "day": 0,
   "hour": 0,
   "flightLoads": [
     {
-      "flightId": "uuid-string",
+      "flightId": "uuid-of-flight",
       "loadedKits": {
-        "first": 10,
-        "business": 50,
+        "first": 2,
+        "business": 10,
         "premiumEconomy": 20,
-        "economy": 150
+        "economy": 100
       }
     }
   ],
   "kitPurchasingOrders": {
-    "first": 100,
-    "business": 200,
-    "premiumEconomy": 150,
+    "first": 10,
+    "business": 50,
+    "premiumEconomy": 100,
     "economy": 500
   }
 }
 ```
 
-**Response:**
+**Response: `HourResponseDto`**
 ```json
 {
   "day": 0,
@@ -185,14 +101,9 @@ Content-Type: application/json
       "flightId": "uuid",
       "originAirport": "HUB1",
       "destinationAirport": "A1",
-      "departure": {"day": 0, "hour": 15},
-      "arrival": {"day": 0, "hour": 20},
-      "passengers": {
-        "first": 2,
-        "business": 10,
-        "premiumEconomy": 20,
-        "economy": 100
-      },
+      "departure": { "day": 0, "hour": 2 },
+      "arrival": { "day": 0, "hour": 4 },
+      "passengers": { "first": 2, "business": 10, "premiumEconomy": 20, "economy": 100 },
       "aircraftType": "A320"
     }
   ],
@@ -211,703 +122,291 @@ Content-Type: application/json
 }
 ```
 
-**Flight Event Types:**
-- `SCHEDULED` (24h before) - Planned data
-- `CHECKED_IN` (1h before) - Actual passengers & aircraft
-- `LANDED` (at arrival) - Final confirmation
+---
 
-**Important Notes:**
-- Must play rounds **sequentially** (0:0 → 0:1 → 0:2...)
-- Can modify flight loads **multiple times** until takeoff
-- Backend validates day/hour matches expected time
+## 💰 Cost Structure
+
+### **Operational Costs**
+
+1. **Kit Loading Cost**: `airport.loadingCost` per kit per class
+2. **Kit Movement Cost**: `kitQuantity × distance × aircraftType.costPerKgPerKm × kitType.weight`
+3. **Kit Processing Cost**: `airport.processingCost × kitQuantity` (applied when used kits are cleaned)
+4. **Kit Purchasing Cost**: `kitType.cost × quantity` (base purchase price)
+
+### **Penalties (from `PenaltyFactors.java`)**
+
+| Penalty Type | Factor | Formula |
+|--------------|--------|---------|
+| **Flight Overload** | 5.0 | `factor × kitCost × distance × overloadedKits` |
+| **Unfulfilled Passengers** | 0.003 | `factor × kitCost × distance × unfulfilledPassengers` |
+| **Incorrect Flight Load** | 5000 | Fixed penalty per invalid submission |
+| **Negative Inventory** | 5342 | `factor × abs(negativeKits)` |
+| **Over Capacity Stock** | 777 | `factor × excessKits` |
+| **End-Game Remaining Stock** | 0.0013 | `factor × remainingKits × kitCost` |
+| **End-Game Pending Processing** | 0.0013 | `factor × pendingKits × kitCost` |
+| **End-Game Unfulfilled Flights** | 1.5 | `factor × flightDistance × totalKitValue` |
+| **Early End of Game** | 1000 × missingHours | Penalty for stopping before 720 hours |
 
 ---
 
-### 3. End Session
+## 🧠 Algorithm Development Plan
 
-**Endpoint:** `POST /session/end`
+### **Phase 1: Basic Working Solution (Baseline)**
 
-**Headers:**
-```
-API-KEY: <your-api-key>
-```
+**Goal:** Create a simple algorithm that completes a full session without major penalties.
 
-**Response:**
-```json
-{
-  "day": 29,
-  "hour": 23,
-  "flightUpdates": null,
-  "penalties": [...],
-  "totalCost": 567890.12
-}
-```
+#### **v1.0 - Naive Exact Match**
+- **Strategy**: Load exactly the number of kits equal to passengers for each flight
+- **Purchase Strategy**: Buy kits whenever HUB1 stock drops below 50% capacity
+- **Why**: Establishes baseline, ensures no unfulfilled passengers
+- **Expected Issues**: High costs, doesn't account for returning kits, ignores processing time
 
-**Notes:**
-- Applies end-of-game penalties
-- **Early stop** multiplies all end-game penalties by 1000!
+#### **v1.1 - Add Safety Buffer**
+- **Improvement**: Load `passengers + 5%` extra kits per flight
+- **Purchase Trigger**: Buy when stock < 30% capacity
+- **Why**: Handles minor variations, prevents stockouts
+- **New Issues**: Higher transport costs, excess stock penalties
 
----
+### **Phase 2: Optimize Kit Flow (Intermediate)**
 
-## 💰 Cost Formulas
+#### **v2.0 - Account for Return Kits**
+- **Track**: Monitor kits in-flight and in-processing queues
+- **Calculate**: `effective_stock = current_stock + processing_kits + returning_kits`
+- **Purchase Logic**: Only buy when `effective_stock < demand_forecast_7days`
+- **Expected Gain**: 20-30% cost reduction from fewer purchases
 
-### 1. Kit Loading Cost
-```
-LoadingCost = Σ(kits × airport.loadingCost_per_class)
-```
+#### **v2.1 - Processing Time Awareness**
+- **Track Flight Pairs**: Monitor HUB→OUT and OUT→HUB flight schedules
+- **Calculate Turnaround**: Ensure sufficient gap between flights for kit processing
+- **Preposition Kits**: Send extra kits to outstations with tight turnarounds
+- **Expected Gain**: 10-15% fewer penalties from stock availability
 
-**Example:**
-- Loading 100 Economy kits at HUB1 (cost: 0.5 per kit)
-- Cost = 100 × 0.5 = **$50**
+#### **v2.2 - Demand Forecasting**
+- **Analyze Patterns**: Parse flight schedule to predict 24h/72h demand per airport per class
+- **Purchase Optimization**: Buy in bulk considering lead times (12-48h)
+- **Stock Target**: `min_stock = max(processing_time_demand, safety_buffer)`
+- **Expected Gain**: 15-20% reduction in purchasing costs
 
----
+### **Phase 3: Advanced Optimization (Advanced)**
 
-### 2. Kit Movement Cost (Transport)
-```
-MovementCost = actualDistance × aircraftType.costPerKgPerKm × Σ(kits × kitWeight)
-```
+#### **v3.0 - Cost-Aware Loading**
+- **Flight Prioritization**: Load based on `cost_per_kit = loading_cost + (distance × weight × cost_per_kg_km)`
+- **Optimization**: For outstations with multiple flights, choose cheaper flights for restocking
+- **Dynamic Buffer**: Adjust safety margins based on `penalty_risk vs transport_cost` trade-off
+- **Expected Gain**: 10-15% from smarter flight selection
 
-**Example:**
-- Flight: 3000 km
-- Aircraft: 0.08 $/kg/km
-- Kits: 100 Economy (1.5 kg each)
-- Cost = 3000 × 0.08 × (100 × 1.5) = **$36,000**
+#### **v3.1 - Multi-Airport Balancing**
+- **Network View**: Consider all outstations holistically
+- **Rebalancing**: Use flights strategically to move kits between locations (via HUB)
+- **Priority System**: Focus on high-traffic, high-penalty-risk airports
+- **Expected Gain**: 5-10% from network efficiency
 
----
+#### **v3.2 - Predictive Delays Handling**
+- **Pattern Recognition**: Detect flights with historical delays (if data available)
+- **Proactive Loading**: Load extra kits on delay-prone routes
+- **Buffer Allocation**: Maintain emergency stock at high-variance outstations
+- **Expected Gain**: 5-10% penalty avoidance
 
-### 3. Kit Processing Cost
-```
-ProcessingCost = Σ(kits × destinationAirport.processingCost_per_class)
-```
+### **Phase 4: Machine Learning / Advanced Algorithms (Expert)**
 
-**Applied when kits arrive at destination after processing time**
+#### **v4.0 - Linear Programming (LP)**
+- **Model**: Formulate as LP problem
+  - **Variables**: Kit loads per flight, purchase quantities per hour
+  - **Objective**: Minimize total cost
+  - **Constraints**: Stock capacity, aircraft capacity, non-negativity, flow balance
+- **Solver**: Use library (OR-Tools, PuLP, Gurobi)
+- **Horizon**: Optimize over rolling 24h window
+- **Expected Gain**: 10-20% from mathematical optimum within constraints
 
----
+#### **v4.1 - Genetic Algorithm (GA)**
+- **Genome**: Vector of flight loads + purchase decisions for 24h
+- **Fitness**: Total cost (run simulation)
+- **Operators**: Mutation (±X kits), crossover (split/merge strategies)
+- **Evolution**: Run 100-500 generations per round
+- **Expected Gain**: 15-25% if well-tuned, handles non-linear penalties better
 
-### 4. Kit Purchasing Cost
-```
-PurchaseCost = Σ(kits × kitCost)
-```
+#### **v4.2 - Reinforcement Learning (RL)**
+- **State**: Current stocks, processing queue, next 24h flights
+- **Action**: Load quantities + purchase amounts
+- **Reward**: -total_cost (penalties + operations)
+- **Training**: Simulate thousands of sessions offline
+- **Agent**: DQN or PPO
+- **Expected Gain**: 20-30% if properly trained, adapts to patterns
 
-**Example:**
-- Buying 100 Economy kits (cost: $50 each)
-- Cost = 100 × 50 = **$5,000**
+#### **v4.3 - Hybrid Approach**
+- **Combine**: LP for deterministic core + RL for uncertainty handling
+- **Monte Carlo**: Simulate flight delays/variations, optimize expected cost
+- **Ensemble**: Run multiple algorithms, choose best decision by majority vote
+- **Expected Gain**: 5-10% additional from robustness
 
----
+### **Phase 5: Fine-Tuning & Edge Cases (Final)**
 
-## ⚠️ Penalty System
+#### **v5.0 - End-Game Strategy**
+- **Last 24 Hours**: Minimize remaining stock penalties
+- **Load Management**: Push excess kits onto final flights
+- **Purchase Stop**: Avoid buying in last 72h unless critical
+- **Expected Gain**: 5-10% end-game penalty reduction
 
-### Penalty Factors (Constants)
-```
-NEGATIVE_INVENTORY              = 5342.0   (MOST EXPENSIVE!)
-INCORRECT_FLIGHT_LOAD           = 5000.0
-OVER_CAPACITY_STOCK             = 777.0
-FLIGHT_OVERLOAD_PER_DISTANCE    = 5.0
-UNFULFILLED_KIT_PER_DISTANCE    = 0.003
-END_OF_GAME_REMAINING_STOCK     = 0.0013
-END_OF_GAME_PENDING_PROCESSING  = 0.0013
-END_OF_GAME_UNFULFILLED_FLIGHTS = 1.5
-EARLY_END_OF_GAME               = 1000.0   (MULTIPLIER!)
-```
+#### **v5.1 - Edge Case Handling**
+- **Zero Passenger Flights**: Use for repositioning
+- **High-Capacity Aircraft**: Opportunistic bulk transport
+- **Processing Queue Overflow**: Prioritize high-value kits
+- **Expected Gain**: 2-5% robustness
 
----
-
-### In-Game Penalties
-
-#### 1. Negative Inventory (💀 AVOID AT ALL COSTS!)
-```
-Penalty = 5342 × |negative_kits|
-```
-
-**Example:**
-- Airport A1 has -10 Economy kits
-- Penalty = 5342 × 10 = **$53,420**
-
-**When it happens:**
-- Airport stock goes below 0
-- You tried to load more kits than available
-
----
-
-#### 2. Overstock
-```
-Penalty = 777 × (kits_over_capacity)
-```
-
-**Example:**
-- Capacity: 1000 kits, Current: 1050 kits
-- Penalty = 777 × 50 = **$38,850**
+#### **v5.2 - Parameter Tuning**
+- **A/B Testing**: Run multiple sessions with parameter variations
+- **Grid Search**: Optimize safety buffers, purchase triggers, forecast windows
+- **Cross-Validation**: Test on different week patterns
+- **Expected Gain**: 3-7% fine-tuning gains
 
 ---
 
-#### 3. Flight Overload
-```
-Penalty = 5.0 × kitCost × actualDistance × excess_kits
-```
+## 🚀 Implementation Roadmap
 
-**Example:**
-- Loaded 150 Economy kits, capacity: 130
-- Distance: 3000 km, Kit cost: $50
-- Penalty = 5.0 × 50 × 3000 × 20 = **$15,000,000**
+### **Week 1: Foundation**
+- Day 1-2: Setup environment, understand API, read all data files
+- Day 3-4: Implement v1.0 (Naive solution) + session manager
+- Day 5: Test full session, verify no crashes, document issues
+- Day 6-7: Implement v1.1 (Safety buffer) + basic logging
 
----
+### **Week 2: Optimization Core**
+- Day 8-10: Implement v2.0 (Return kits tracking)
+- Day 11-13: Implement v2.1 (Processing awareness)
+- Day 14: Implement v2.2 (Demand forecasting)
 
-#### 4. Unfulfilled Passengers
-```
-Penalty = 0.003 × kitCost × actualDistance × passengers_without_kits
-```
+### **Week 3: Advanced Algorithms**
+- Day 15-17: Choose one: v4.0 (LP), v4.1 (GA), or v4.2 (RL)
+- Day 18-20: Implement chosen algorithm
+- Day 21: Test and compare with v2.2 baseline
 
-**Example:**
-- 10 Economy passengers without kits
-- Distance: 3000 km, Kit cost: $50
-- Penalty = 0.003 × 50 × 3000 × 10 = **$4,500**
-
----
-
-#### 5. Invalid Flight Reference
-```
-Penalty = 5000 per invalid flight
-```
-
-**When it happens:**
-- Flight ID doesn't exist
-- Flight already departed
-- Wrong timing
+### **Week 4: Polish & Competition**
+- Day 22-24: Implement v3.0-v3.2 enhancements
+- Day 25-26: Edge cases + end-game strategy
+- Day 27-28: Parameter tuning + multiple test runs
+- Day 29: Final testing, code cleanup, documentation
+- Day 30: Competition day - deploy best version
 
 ---
 
-### End-of-Game Penalties
+## 📊 Key Data Files
 
-#### 1. Remaining Stock
-```
-normalizedStock = availableKits
-if (availableKits < 0):
-    normalizedStock = |availableKits| × 5342
-if (availableKits > capacity):
-    normalizedStock = (availableKits - capacity) × 777
-
-Penalty = 0.0013 × normalizedStock × kitCost × factor
-```
+| File | Path | Content |
+|------|------|---------|
+| Airports | `eval-platform/src/main/resources/liquibase/data/airports_with_stocks.csv` | 160+ airports with capacity, costs, initial stocks |
+| Flight Schedule | `eval-platform/src/main/resources/liquibase/data/flight_plan.csv` | 447 scheduled flights (recurring) |
+| Aircraft Types | `eval-platform/src/main/resources/liquibase/data/aircraft_types.csv` | 5-6 aircraft with capacities and costs |
+| Teams | `eval-platform/src/main/resources/liquibase/data/teams.csv` | API keys for testing |
 
 ---
 
-#### 2. Pending Kit Processing
-```
-Penalty = 0.0013 × pending_kits × kitCost × factor
-```
+## 🔧 Local Development
 
----
+### **Requirements**
+- Java 25
+- Maven 3.x
+- Git
 
-#### 3. Unfulfilled Flight Kits
-```
-Penalty = 1.5 × distance × factor × 
-          Σ(passengers × kitCost × kitWeight per class)
-```
-
----
-
-#### 4. Early Stop Multiplier
-```
-missingHours = 720 - currentHour
-if (missingHours < 24):
-    missingHours = missingHours × 10
-
-factor = 1000 × missingHours
-```
-
-**Example:**
-- Stop at hour 700 (20 hours early)
-- Factor = 1000 × 20 = **20,000**
-- ALL end-game penalties × 20,000!
-
-**⚠️ NEVER STOP EARLY!**
-
----
-
-## 🎮 Game Mechanics
-
-### Round Execution (8 Steps)
-
-Each round (hour) executes in this order:
-
-1. **Validate Session** - Check active session and correct timing
-2. **Apply Kit Loads** - Create movements, deduct from origin stock
-3. **Apply Purchases** - Process HUB1 orders with lead-time
-4. **Process Movements** - Execute scheduled arrivals/departures
-5. **Check Boundaries** - Apply negative/overstock penalties
-6. **Create Landing Movements** - Schedule processing queue
-7. **Advance Time** - Move to next hour
-8. **Update Flight Status** - Update SCHEDULED→CHECKED_IN→LANDED
-
----
-
-### Critical Timing Rules
-
-#### Flight Information Timeline:
-```
-Hour -24: SCHEDULED event (planned data)
-    ↓
-Hour -1:  CHECKED_IN event (actual passengers & aircraft)
-    ↓
-Hour 0:   Flight departs
-    ↓
-Hour +X:  LANDED event (at destination)
-```
-
-#### Kit Processing Timeline:
-```
-Flight lands at A1
-    ↓
-Kits enter processing queue
-    ↓
-Wait: processing_time hours (4-45h at outstations!)
-    ↓
-Kits available in A1 stock
-```
-
-**Example:**
-```
-Hour 0:  Flight HUB1→A1 departs (100 Economy kits)
-Hour 5:  Flight lands at A1
-Hour 5:  Kits enter processing (processing time: 4h)
-Hour 9:  Kits available in A1 stock
-```
-
-**⚠️ CRITICAL:**
-If return flight is at Hour 7, those kits WON'T be ready!
-
----
-
-### Stock Management Rules
-
-1. **Stock updates** happen when kit movements are processed
-2. **Movements are negative** when loading (deduct from stock)
-3. **Movements are positive** when arriving/processing complete
-4. **Penalties apply** if stock goes negative or over capacity
-5. **Processing time** varies by airport and kit class
-
----
-
-## 📊 Data Files
-
-### Location
-```
-eval-platform/src/main/resources/liquibase/data/
-```
-
-### 1. airports_with_stocks.csv
-
-**Columns:**
-```
-code                  - Airport code (HUB1, A1, A2, ...)
-name                  - Airport name
-first_processing_time - Hours to process First Class kits
-business_processing_time
-premium_economy_processing_time
-economy_processing_time
-first_processing_cost - Cost per kit
-business_processing_cost
-premium_economy_processing_cost
-economy_processing_cost
-first_loading_cost    - Cost per kit
-business_loading_cost
-premium_economy_loading_cost
-economy_loading_cost
-initial_fc_stock     - Starting inventory
-initial_bc_stock
-initial_pe_stock
-initial_ec_stock
-capacity_fc          - Maximum storage
-capacity_bc
-capacity_pe
-capacity_ec
-```
-
-**Example - HUB1:**
-```
-Code: HUB1
-Processing Time: FC=6h, BC=4h, PE=2h, EC=1h
-Processing Cost:  FC=8.0, BC=6.0, PE=2.0, EC=1.0
-Loading Cost:     FC=1.0, BC=0.75, PE=0.5, EC=0.5
-Initial Stock:    FC=1659, BC=5184, PE=2668, EC=23651
-Capacity:         FC=18109, BC=18109, PE=9818, EC=95075
-```
-
-**Example - Outstation ZHVK:**
-```
-Code: ZHVK
-Processing Time: FC=45h, BC=28h, PE=12h, EC=4h  ⚠️ MUCH LONGER!
-Processing Cost:  FC=6.67, BC=5.23, PE=3.55, EC=1.65
-Loading Cost:     FC=3.3, BC=2.09, PE=2.01, EC=1.38
-Initial Stock:    FC=158, BC=105, PE=135, EC=304
-Capacity:         FC=445, BC=445, PE=290, EC=803
-```
-
----
-
-### 2. aircraft_types.csv
-
-**Columns:**
-```
-type_code                       - Aircraft model code
-first_class_seats              - Passenger capacity per class
-business_seats
-premium_economy_seats
-economy_seats
-cost_per_kg_per_km             - Fuel cost (for movement cost)
-first_class_kits_capacity      - Kit capacity per class
-business_kits_capacity
-premium_economy_kits_capacity
-economy_kits_capacity
-```
-
-**Example:**
-```
-Type: OJF294
-Seats:        FC=13, BC=67, PE=31, EC=335
-Cost/kg/km:   0.08
-Kit Capacity: FC=18, BC=105, PE=44, EC=781
-```
-
----
-
-### 3. flight_plan.csv
-
-**Columns:**
-```
-depart_code          - Origin airport
-arrival_code         - Destination airport
-scheduled_hour       - Departure hour (0-23)
-scheduled_arrival_hour - Arrival hour
-arrival_next_day     - 0 or 1 (crosses midnight?)
-distance_km          - Flight distance
-Mon, Tue, Wed, Thu, Fri, Sat, Sun - Operating days (0 or 1)
-```
-
-**Example:**
-```
-Route: HUB1 → ZHVK → HUB1
-Depart: 15:00, Arrive: 20:00 (same day)
-Return: 21:00, Arrive: 02:00 (next day)
-Distance: 3664 km
-Days: Monday only
-```
-
----
-
-### 4. teams.csv
-
-**Columns:**
-```
-id        - Team UUID
-color     - Display color
-name      - Team name
-api_key   - Your authentication key
-```
-
-**Example:**
-```
-Testing-1: 43b9ab90-b593-404c-a8d8-aaa074e181e1
-Testing-2: 03d6a5d1-afba-41ca-9343-376de757550b
-```
-
-**Use any API key from this file for local testing!**
-
----
-
-## 💡 Strategy Guide
-
-### Basic Strategy (Starter Algorithm)
-
-```python
-for each flight in next 24 hours:
-    # 1. Load exactly enough kits for passengers
-    for each class:
-        kits_to_load = passengers[class]
-    
-    # 2. Add buffer for safety (5-10%)
-    kits_to_load = passengers[class] * 1.05
-    
-    # 3. Check if origin airport has enough stock
-    if stock < kits_to_load:
-        # Purchase at HUB1 if it's the origin
-        # Or send kits on earlier flight if outstation
-```
-
----
-
-### Intermediate Strategy
-
-**Key Optimizations:**
-
-1. **Predictive Stocking**
-   - Analyze flight schedule for next 48-72 hours
-   - Pre-position kits at outstations before demand spikes
-   
-2. **Processing Time Management**
-   - Account for processing delays at outstations
-   - Send extra kits knowing return flight kits won't be ready
-   
-3. **Cost Minimization**
-   - Balance: cheap transport of many kits vs. risk of stockouts
-   - Consider: distance × fuel cost vs. penalty costs
-   
-4. **Capacity Planning**
-   - Don't exceed aircraft kit capacity
-   - Don't exceed airport storage capacity
-   - Monitor daily intake/outtake limits
-
----
-
-### Advanced Strategy
-
-**Techniques:**
-
-1. **Linear Programming (LP)**
-   - Objective: Minimize total cost
-   - Constraints: Capacity, stock levels, processing times
-   - Variables: Kits per flight, purchase quantities
-
-2. **Genetic Algorithms (GA)**
-   - Evolve solutions over generations
-   - Fitness function: Total cost (lower = better)
-   - Crossover: Combine successful strategies
-
-3. **Reinforcement Learning (RL)**
-   - State: Current stocks, pending flights, hour
-   - Actions: Kit loading decisions, purchases
-   - Reward: Negative cost (minimize)
-   
-4. **Predictive Analytics**
-   - Learn patterns: Busy routes, quiet periods
-   - Adjust buffer sizes dynamically
-   - Optimize restock timing
-
----
-
-### Critical Insights
-
-#### 1. **Processing Time Trap**
-```
-Outbound flight: 100 kits used
-Processing time: 28 hours
-Return flight: 6 hours later
-Result: Those 100 kits NOT available!
-
-Solution: Send extra kits proactively
-```
-
-#### 2. **Cost Hierarchy**
-```
-Negative inventory (5342) >>> Everything else
-
-Priority 1: Never go negative
-Priority 2: Avoid flight overload
-Priority 3: Minimize movement costs
-Priority 4: Minimize unfulfilled passengers
-```
-
-#### 3. **HUB1 Advantages**
-```
-✓ Only place to buy kits
-✓ Fastest processing (1-6h)
-✓ Cheapest loading costs
-✓ Huge capacity
-✓ All flights originate/return here
-
-Strategy: Use HUB1 as buffer/warehouse
-```
-
-#### 4. **Outstation Challenges**
-```
-✗ Cannot buy kits
-✗ Slow processing (4-45h)
-✗ Higher costs
-✗ Limited capacity
-
-Strategy: Pre-emptive stocking
-```
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-1. **Java 25** installed
-2. **Maven** installed
-3. **IntelliJ IDEA** (or any IDE)
-4. **Python 3.8+** (for client algorithm)
-
----
-
-### Setup Backend
-
-1. **Clone and navigate:**
-   ```bash
-   cd eval-platform
-   ```
-
-2. **Run with local profile:**
-   ```bash
-   mvn spring-boot:run -Dspring.profiles.active=local
-   ```
-
-3. **Verify it's running:**
-   - Open browser: http://localhost:8080/swagger-ui/index.html
-   - You should see the API documentation
-
-4. **Get your API key:**
-   - Open: `src/main/resources/liquibase/data/teams.csv`
-   - Copy any `api_key` value (e.g., Testing-1's key)
-
----
-
-### Test with Bruno/Postman
-
-1. **Start Session:**
-   ```
-   POST http://localhost:8080/api/v1/session/start
-   Header: API-KEY: <your-key>
-   ```
-
-2. **Play Round:**
-   ```
-   POST http://localhost:8080/api/v1/play/round
-   Headers:
-     API-KEY: <your-key>
-     SESSION-ID: <session-uuid>
-     Content-Type: application/json
-   Body: {"day": 0, "hour": 0, "flightLoads": [], "kitPurchasingOrders": {...}}
-   ```
-
-3. **End Session:**
-   ```
-   POST http://localhost:8080/api/v1/session/end
-   Header: API-KEY: <your-key>
-   ```
-
----
-
-### Development Checklist
-
-- [ ] ✅ Setup Environment (Java 25, Maven, IDE)
-- [ ] ✅ Explore API (Swagger, test endpoints)
-- [ ] ✅ Understand Data (read CSV files, network structure)
-- [ ] 📝 Build Simple Prototype (load kits = passengers)
-- [ ] 🧪 Test & Iterate (run sessions, analyze costs)
-- [ ] 🚀 Optimize (LP, GA, RL algorithms)
-- [ ] ⚠️ Handle Edge Cases (delays, capacity limits)
-- [ ] 📊 Add Monitoring (logging, debugging)
-
----
-
-## 📝 Useful Commands
-
-### Backend Management
-
+### **Run Backend**
 ```bash
-# Start backend
-mvn spring-boot:run -Dspring.profiles.active=local
-
-# Clean and rebuild
-mvn clean install
-
-# Check if running
-curl http://localhost:8080/swagger-ui/index.html
+cd eval-platform
+mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-### Data Exploration
+### **Access API Documentation**
+- Swagger UI: http://127.0.0.1:8080/swagger-ui/index.html
+- OpenAPI Spec: http://127.0.0.1:8080/api-docs
 
-```bash
-# View airports
-cat src/main/resources/liquibase/data/airports_with_stocks.csv | head -5
-
-# View flights
-cat src/main/resources/liquibase/data/flight_plan.csv | head -10
-
-# View aircraft
-cat src/main/resources/liquibase/data/aircraft_types.csv | head -5
-```
+### **Get API Key**
+- For local testing: Use keys from `teams.csv`
+- For competition: You'll receive a unique key
 
 ---
 
-## 🐛 Troubleshooting
+## 📈 Success Metrics
 
-### Issue: 401 Unauthorized
-**Solution:** Check API-KEY header is correct UUID from teams.csv
+### **Stage 1: Automated Ranking (50% weight)**
+- **Metric**: Total Cost = Operational + Penalties + End-Game
+- **Ranking**: Lower cost = better rank
+- **Top 8** advance to Stage 2
 
-### Issue: 400 Bad Request - Type mismatch
-**Solution:** Add SESSION-ID header to Play Round request
+### **Stage 2: Jury Interviews (50% weight)**
+- Technical Quality (25p)
+- Problem Understanding (25p)
+- Innovation (20p)
+- UX (15p)
+- Presentation (15p)
 
-### Issue: No data loaded (0 flights cached)
-**Solution:** Run with `-Dspring.profiles.active=local` profile
-
-### Issue: Parse error in Bruno
-**Not actually an error!** Start Session returns plain UUID string, not JSON.
-
-### Issue: Session already exists
-**Solution:** End current session first, or use different API key
-
----
-
-## 📚 Additional Resources
-
-- **OpenAPI Spec:** http://localhost:8080/api-docs
-- **Swagger UI:** http://localhost:8080/swagger-ui/index.html
-- **Source Code:** eval-platform/src/main/java/com/sap/hackaton2025/
-- **Penalty Factors:** PenaltyFactors.java
-- **Kit Types:** KitType.java model
+### **Final Score = Stage1_Points × 0.5 + Stage2_Score × 0.5**
 
 ---
 
-## 🏆 Scoring
+## 🎓 Development Tips
 
-**Stage 1 (50%):** Lowest total cost in automated ranking
-**Stage 2 (50%):** Interview (solution quality, understanding, innovation)
-
-**Final Score = Stage 1 Points + Stage 2 Points**
-
-**Tiebreaker:**
-1. Higher Stage 2 score
-2. Lower Stage 1 total cost
-3. Innovation & Creativity criteria
-4. Jury decision
+1. **Start Simple**: Get v1.0 working perfectly before adding complexity
+2. **Log Everything**: Track decisions, costs, penalties per round for analysis
+3. **Test Incrementally**: Run mini-sessions (24-72 hours) during development
+4. **Version Control**: Commit after each working phase
+5. **Study Penalties**: Understanding penalty formulas helps prioritize optimizations
+6. **Monitor Bottlenecks**: Profile your code - algorithm should complete in < 1 second per round
+7. **Validate Locally**: Check flight IDs, positive values, UUID formats before submitting
+8. **Think Turn-Based**: Don't try to solve 720 hours at once - optimize per round with lookahead
 
 ---
 
-## ⚡ Quick Reference
+## 📞 Important Links
 
-### Most Important Numbers
-```
-Negative Inventory Penalty: 5342 (AVOID!)
-Early Stop Multiplier: 1000 × hours_missing
-Kit Costs: $50 (Economy) to $200 (First)
-Kit Weights: 1.5kg (Economy) to 5kg (First)
-Lead Times: 12h (Economy) to 48h (First)
-Game Duration: 720 hours (30 days)
-```
-
-### API Workflow
-```
-1. POST /session/start → get session_id
-2. Loop 720 times:
-     POST /play/round with decisions
-3. POST /session/end → get final score
-```
-
-### Decision Template
-```json
-{
-  "day": <current_day>,
-  "hour": <current_hour>,
-  "flightLoads": [<kit loading decisions>],
-  "kitPurchasingOrders": {<purchase orders for HUB1>}
-}
-```
+- **Challenge Description**: `html/index.html` (full detailed specs)
+- **Backend Code**: `eval-platform/src/main/java/com/sap/hackaton2025/`
+- **Penalty Logic**: `service/impl/SessionServiceImpl.java` + `service/impl/PenaltyFactors.java`
+- **Cost Calculation**: Lines 455-466 in `SessionServiceImpl.java`
 
 ---
 
-**Good luck with your algorithm! 🚀**
+## 🏆 Competition Strategy
 
+**Phase 1-2 is MANDATORY** - You need a working solution that doesn't crash.
 
+**Phase 3 is RECOMMENDED** - Significant competitive advantage.
+
+**Phase 4 is OPTIONAL** - Only if you have time and expertise. v3.2 can win the competition.
+
+**Phase 5 is POLISH** - Difference between top 3 places.
+
+**Focus on**: Understanding the system deeply > Complex algorithms. A well-tuned v3.x beats a buggy v4.x.
+
+---
+
+## 📝 Quick Reference
+
+### **Critical Numbers**
+- Total Hours: 720 (30 days × 24h)
+- Airports: 160+
+- Flights: 447
+- Classes: 4 (First, Business, Premium Economy, Economy)
+- Kit Lead Times: 48h, 36h, 24h, 12h
+
+### **Decision Points Each Round**
+1. Which flights to load?
+2. How many kits per class per flight?
+3. How many kits to purchase (if any)?
+
+### **Watch Out For**
+- Negative stock at outstations (5342 × kits penalty!)
+- Unfulfilled passengers (0.003 × cost × distance × passengers)
+- Processing time - kits aren't immediately available
+- Lead time - purchases take 12-48h to arrive
+- End-game penalties - minimize remaining stock in last hours
+
+---
+
+## 🎯 Final Notes
+
+This is a **complex optimization problem** with multiple competing objectives:
+- Minimize transport costs (don't overload flights)
+- Avoid passenger penalties (ensure kits available)
+- Minimize inventory costs (don't overbuy)
+- Handle uncertainty (delays, actual vs planned data)
+
+**The key to winning**: Balance these objectives with a smart, adaptive strategy that learns from simulation data.
+
+Good luck! 🚀
