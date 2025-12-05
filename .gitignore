@@ -1,16 +1,7 @@
-# Compiled class file
+# ============================================
+# Java / Maven (eval-platform)
+# ============================================
 *.class
-
-# Log file
-*.log
-
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
 *.jar
 *.war
 *.nar
@@ -19,6 +10,218 @@
 *.tar.gz
 *.rar
 
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+# Maven
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# Build
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ============================================
+# Python (solver)
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyCharm
+.idea/
+
+# ============================================
+# IDE - IntelliJ IDEA
+# ============================================
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# ============================================
+# IDE - Eclipse
+# ============================================
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.loadpath
+.recommenders
+
+# ============================================
+# IDE - VS Code
+# ============================================
+.vscode/
+*.code-workspace
+
+# ============================================
+# IDE - NetBeans
+# ============================================
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# ============================================
+# Logs
+# ============================================
+*.log
+logs/
+*.log.*
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+*.h2.db
+data/
+*.mv.db
+*.trace.db
+
+# H2 Database (used by eval-platform)
+hackaton.db
+hackaton.db.mv.db
+hackaton.db.trace.db
+
+# ============================================
+# OS Files
+# ============================================
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================
+# JVM / Java
+# ============================================
+# Virtual machine crash logs
 hs_err_pid*
 replay_pid*
+
+# ============================================
+# BlueJ
+# ============================================
+*.ctxt
+
+# ============================================
+# Mobile Tools for Java (J2ME)
+# ============================================
+.mtj.tmp/
+
+# ============================================
+# Project Specific
+# ============================================
+# Session data / temporary files
+sessions/
+*.session
+*.tmp
+
+# Test results
+test-results/
+test-output/
+
+# Coverage reports
+coverage/
+*.coverage
+.coverage.*
+htmlcov/
+
+# ============================================
+# Environment / Config
+# ============================================
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+config.local.*
+application-local.properties
+!eval-platform/src/main/resources/application-local.properties
+
+# ============================================
+# Backup files
+# ============================================
+*.bak
+*.backup
+*~
+.#*
