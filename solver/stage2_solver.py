@@ -34,8 +34,11 @@ CLASS_MAPPING = {
 }
 
 # Configuration
-LOOKAHEAD_HOURS = 24
-SAFETY_FACTOR = 1.10
+LOOKAHEAD_HOURS_NORMAL = 24
+ENDGAME_WINDOW_HOURS = 48
+SAFETY_FACTOR_NORMAL = 1.10
+SAFETY_FACTOR_ENDGAME = 1.00  # In end-game, aim exactly for required kits
+TIME_HORIZON = 720
 
 
 @dataclass
@@ -167,11 +170,16 @@ class Stage2Solver:
     """
     
     def __init__(self, api_client: ApiClient, data_loader: DataLoader, 
-                 lookahead_hours: int = LOOKAHEAD_HOURS, safety_factor: float = SAFETY_FACTOR):
+                 lookahead_hours: int = LOOKAHEAD_HOURS_NORMAL, 
+                 endgame_window_hours: int = ENDGAME_WINDOW_HOURS,
+                 safety_factor_normal: float = SAFETY_FACTOR_NORMAL,
+                 safety_factor_endgame: float = SAFETY_FACTOR_ENDGAME):
         self.api_client = api_client
         self.data_loader = data_loader
         self.lookahead_hours = lookahead_hours
-        self.safety_factor = safety_factor
+        self.endgame_window_hours = endgame_window_hours
+        self.safety_factor_normal = safety_factor_normal
+        self.safety_factor_endgame = safety_factor_endgame
         
         # Load data
         self.aircraft_types = data_loader.load_aircraft_types()
@@ -213,8 +221,9 @@ class Stage2Solver:
             'penalty_costs_by_type': defaultdict(float)
         }
         
-        logger.info("Stage 2 solver initialized")
-        logger.info(f"Lookahead: {lookahead_hours}h, Safety factor: {safety_factor}")
+        logger.info("Stage 2.5 solver initialized (Penalty-aware with End-game Planning)")
+        logger.info(f"Normal mode: Lookahead={lookahead_hours}h, Safety={safety_factor_normal}")
+        logger.info(f"End-game mode: Window={endgame_window_hours}h, Safety={safety_factor_endgame}")
     
     def solve(self):
         """Main solving loop"""
@@ -242,8 +251,9 @@ class Stage2Solver:
                     progress = (hour / 720) * 100
                     logger.info(f"[Day {day}, Hour {hour_of_day}] Progress: {progress:.1f}%, Elapsed: {elapsed:.1f}s")
                 
-                # End-game strategy: last 72 hours (3 days)
-                is_end_game = hour >= 648  # Last 72 hours
+                # End-game strategy: last ENDGAME_WINDOW_HOURS hours
+                current_time = day * 24 + hour
+                is_end_game = current_time >= TIME_HORIZON - self.endgame_window_hours
                 
                 # Process arrivals (kits arriving from flights)
                 self._process_arrivals(day, hour_of_day)
@@ -456,10 +466,9 @@ class Stage2Solver:
                                         if f.get('flightId') != flight_info['flightId']]
                 self.scheduled_flights.append(flight_info)
     
-    def _compute_24h_forecast(self, current_time: int) -> Dict[str, Dict[str, int]]:
-        """Compute 24h demand forecast per airport and class"""
+    def _forecast_demand_window(self, current_time: int, time_end: int) -> Dict[str, Dict[str, int]]:
+        """Compute demand forecast per airport and class for a time window"""
         demand_forecast = defaultdict(lambda: defaultdict(int))
-        time_end = current_time + self.lookahead_hours
         
         for flight in self.scheduled_flights:
             dep_time = flight.get('departure_time', 999999)
@@ -474,8 +483,14 @@ class Stage2Solver:
         
         return dict(demand_forecast)
     
-    def _compute_target_stock(self, demand_forecast: Dict[str, Dict[str, int]]) -> Dict[str, Dict[str, int]]:
-        """Compute target stock levels per airport and class"""
+    def _compute_24h_forecast(self, current_time: int) -> Dict[str, Dict[str, int]]:
+        """Compute 24h demand forecast per airport and class (backward compatibility)"""
+        time_end = current_time + self.lookahead_hours
+        return self._forecast_demand_window(current_time, time_end)
+    
+    def _compute_target_stock(self, demand_forecast: Dict[str, Dict[str, int]], 
+                             safety_factor: float) -> Dict[str, Dict[str, int]]:
+        """Compute target stock levels per airport and class with given safety factor"""
         target_stock = defaultdict(lambda: defaultdict(int))
         
         for airport_code, cls_demands in demand_forecast.items():
@@ -484,7 +499,7 @@ class Stage2Solver:
                 continue
             
             for class_name, demand in cls_demands.items():
-                desired = int(demand * self.safety_factor)
+                desired = int(demand * safety_factor)
                 capacity = airport.get_capacity(class_name)
                 target_stock[airport_code][class_name] = min(desired, capacity)
         
@@ -498,32 +513,27 @@ class Stage2Solver:
         current_time = day * 24 + hour
         flight_loads = []
         
-        # Compute forecast and target stock
-        demand_forecast = self._compute_24h_forecast(current_time)
-        target_stock = self._compute_target_stock(demand_forecast)
+        # Detect mode: NORMAL or ENDGAME
+        if current_time < TIME_HORIZON - self.endgame_window_hours:
+            mode = "NORMAL"
+            time_end = min(current_time + self.lookahead_hours, TIME_HORIZON)
+            safety_factor = self.safety_factor_normal
+        else:
+            mode = "ENDGAME"
+            time_end = TIME_HORIZON  # Plan for ALL remaining flights
+            safety_factor = self.safety_factor_endgame
+            logger.debug(f"End-game mode activated at hour {current_time} (planning until {time_end})")
         
-        # Process CHECKED_IN flights - CRITICAL: Load kits for ALL checked-in flights
-        # Also check scheduled flights that are about to depart (within next hour)
+        # Compute forecast and target stock based on mode
+        demand_forecast = self._forecast_demand_window(current_time, time_end)
+        target_stock = self._compute_target_stock(demand_forecast, safety_factor)
+        
+        # Process CHECKED_IN flights - CRITICAL: Only load kits for flights that are actually CHECKED_IN
+        # The API only accepts loads for flights in CHECKED_IN state, not SCHEDULED
+        # We use scheduled_flights for forecasting/planning, but only load when CHECKED_IN
         checked_in_flights = [f for f in flight_updates if f.get("eventType") == "CHECKED_IN"]
         
-        # Also check scheduled flights that are departing very soon (within next hour)
-        # to ensure we don't miss any flights
-        scheduled_flights_soon = []
-        for flight in self.scheduled_flights:
-            dep_time = flight.get('departure_time', 999999)
-            if current_time <= dep_time < current_time + 1:  # Departing in next hour
-                # Check if we haven't already processed this flight
-                if not any(f.get('flightId') == flight.get('flightId') for f in checked_in_flights):
-                    scheduled_flights_soon.append({
-                        'flightId': flight.get('flightId'),
-                        'originAirport': flight.get('origin'),
-                        'destinationAirport': flight.get('destination'),
-                        'aircraftType': flight.get('aircraftType'),
-                        'passengers': flight.get('passengers', {}),
-                        'eventType': 'SCHEDULED_SOON'
-                    })
-        
-        all_flights_to_process = checked_in_flights + scheduled_flights_soon
+        all_flights_to_process = checked_in_flights
         
         for flight in all_flights_to_process:
             flight_id = flight.get("flightId")
@@ -555,11 +565,23 @@ class Stage2Solver:
             loaded_kits = {}
             
             for class_name in CLASS_NAMES:
-                pax_demand = passengers.get(class_name, 0)
-                # CRITICAL: Always load passenger demand, even if 0 (to ensure flight is processed)
-                # Only skip repositioning if no demand and not from HUB1
-                if pax_demand == 0 and origin != "HUB1":
-                    # Only load from HUB1 for repositioning
+                # FIX 1: In ENDGAME mode, use planned demand from schedule, not just runtime passengers
+                # This ensures we cover flights even if runtime passengers is 0 but schedule has planned passengers
+                if mode == "ENDGAME":
+                    # Find this flight in scheduled_flights to get planned passengers
+                    scheduled_flight = next((f for f in self.scheduled_flights 
+                                           if f.get('flightId') == flight_id), None)
+                    if scheduled_flight:
+                        planned_passengers = scheduled_flight.get('passengers', {}).get(class_name, 0)
+                        pax_demand = max(passengers.get(class_name, 0), planned_passengers)
+                    else:
+                        pax_demand = passengers.get(class_name, 0)
+                else:
+                    pax_demand = passengers.get(class_name, 0)
+                
+                # FIX 2: Don't skip classes in ENDGAME - we need to cover all planned demand
+                if pax_demand == 0 and origin != "HUB1" and mode != "ENDGAME":
+                    # Only skip repositioning in normal mode if no demand
                     loaded_kits[class_name] = 0
                     continue
                 
@@ -574,24 +596,31 @@ class Stage2Solver:
                 aircraft_cap = aircraft.get_capacity(class_name)
                 dest_capacity = dest_airport.get_capacity(class_name)
                 
-                # 1. Cover current passenger demand
-                # Always load at least passenger demand (up to capacity)
-                # The API will handle actual inventory validation
-                kits_for_pax = min(pax_demand, aircraft_cap)
+                # FIX 3: Respect inventory when loading - don't override to ignore stock
+                # First, decide what we WISH to load
+                wish_for_pax = min(pax_demand, aircraft_cap)
                 
-                # If we don't have enough stock, we still load demand (may cause negative inventory penalty)
-                # but that's better than unfulfilled passenger penalty
-                if origin_stock < kits_for_pax:
-                    logger.debug(f"Low stock at {origin} for {class_name}: "
-                               f"stock={origin_stock}, loading={kits_for_pax}")
+                # Hard cap by real stock (don't go negative)
+                max_from_stock = max(0, origin_stock)
+                kits_for_pax = min(wish_for_pax, max_from_stock)
                 
-                # 2. Calculate extra kits for repositioning (only from HUB1)
-                # More conservative: only reposition if destination really needs it
-                # In end-game, don't reposition (minimize remaining stock)
+                # Log if we can't load full demand
+                if kits_for_pax < wish_for_pax:
+                    if mode == "ENDGAME":
+                        logger.warning(f"ENDGAME: Cannot load full demand at {origin} for {class_name}: "
+                                     f"wish={wish_for_pax}, stock={origin_stock}, loading={kits_for_pax}")
+                    else:
+                        logger.debug(f"Low stock at {origin} for {class_name}: "
+                                   f"wish={wish_for_pax}, stock={origin_stock}, loading={kits_for_pax}")
+                
+                # 2. Calculate extra kits for repositioning
+                # Stage 2.5: In ENDGAME mode, only reposition from HUB1 (don't drain outstations)
                 extra_kits = 0
-                is_end_game = current_time >= 648  # Last 72 hours
                 
-                if origin == "HUB1" and not is_end_game:
+                if mode == "ENDGAME" and origin != "HUB1":
+                    # In end-game, don't pull kits from outstations (they need them for their last flights)
+                    extra_kits = 0
+                elif origin == "HUB1":
                     # Calculate actual deficit (considering what's already in transit)
                     dest_deficit = max(0, target_dest - dest_stock)
                     
@@ -639,10 +668,8 @@ class Stage2Solver:
                 # Ensure we don't exceed aircraft capacity
                 kits_loaded = min(kits_loaded, aircraft_cap)
                 
-                # Ensure we load at least passenger demand (if possible)
-                if kits_loaded < pax_demand and kits_loaded < aircraft_cap:
-                    # Try to load at least demand
-                    kits_loaded = min(pax_demand, aircraft_cap)
+                # FIX 3 (continued): Don't override to ignore inventory - we already respected it above
+                # The kits_for_pax already respects inventory, so kits_loaded is correct
                 
                 loaded_kits[class_name] = kits_loaded
                 
@@ -675,6 +702,10 @@ class Stage2Solver:
                     "flightId": flight_id,
                     "loadedKits": loaded_kits
                 })
+            elif mode == "ENDGAME":
+                # In end-game, log if we're not loading anything (might indicate a problem)
+                logger.warning(f"ENDGAME: Flight {flight_id} from {origin} has no kits loaded "
+                             f"(passengers: {passengers})")
         
         return flight_loads
     
@@ -729,12 +760,22 @@ class Stage2Solver:
     
     def _calculate_purchases_with_lookahead(self, flight_updates: List[Dict], 
                                             day: int, hour: int) -> Dict[str, int]:
-        """Calculate purchases based on HUB1 forecast - more conservative"""
+        """Calculate purchases based on HUB1 forecast - Stage 2.5: More aggressive in end-game"""
         purchases = {cls: 0 for cls in CLASS_NAMES}
         current_time = day * 24 + hour
         
-        # Compute forecast for HUB1
-        demand_forecast = self._compute_24h_forecast(current_time)
+        # Detect mode
+        if current_time < TIME_HORIZON - self.endgame_window_hours:
+            mode = "NORMAL"
+            time_end = min(current_time + self.lookahead_hours, TIME_HORIZON)
+            safety_factor = self.safety_factor_normal
+        else:
+            mode = "ENDGAME"
+            time_end = TIME_HORIZON  # Plan for ALL remaining flights
+            safety_factor = self.safety_factor_endgame
+        
+        # Compute forecast for HUB1 (based on mode)
+        demand_forecast = self._forecast_demand_window(current_time, time_end)
         hub1_forecast = demand_forecast.get("HUB1", {})
         
         # Get current HUB1 inventory (estimated)
@@ -754,14 +795,23 @@ class Stage2Solver:
             pending = pending_arrivals.get(class_name, 0)
             effective_stock = current_stock + pending
             
-            # Target is based on forecast with safety factor
-            target_stock = int(forecast_demand * self.safety_factor)
+            # Target is based on forecast with safety factor (mode-dependent)
+            target_stock = int(forecast_demand * safety_factor)
             
-            # Only purchase if significantly below target (60% threshold)
-            if effective_stock < target_stock * 0.6:
+            # Stage 2.5: More aggressive purchasing in end-game to ensure all flights are covered
+            if mode == "ENDGAME":
+                # In end-game, buy more aggressively to cover ALL remaining flights
+                threshold = 0.8  # Buy if below 80% of target
+                buy_percentage = 0.7  # Buy 70% of deficit
+            else:
+                # Normal mode: more conservative
+                threshold = 0.6  # Buy if below 60% of target
+                buy_percentage = 0.4  # Buy 40% of deficit
+            
+            if effective_stock < target_stock * threshold:
                 deficit = target_stock - effective_stock
-                # Buy conservatively - only 40% of deficit
-                purchase_qty = int(deficit * 0.4)
+                # Buy based on mode
+                purchase_qty = int(deficit * buy_percentage)
                 purchase_qty = ((purchase_qty + 9) // 10) * 10  # Round to nearest 10
                 
                 # Cap at API limits
@@ -820,21 +870,60 @@ class Stage2Solver:
             self.stats['kits_purchased'][class_name] += purchases.get(class_name, 0)
     
     def _calculate_end_game_purchases(self, day: int, hour: int) -> Dict[str, int]:
-        """End-game strategy: minimize purchases, only buy if absolutely critical"""
+        """End-game strategy: Stage 2.5 - Aggressively purchase to cover ALL remaining flights"""
+        # Use the same logic as _calculate_purchases_with_lookahead but with end-game mode
+        # This ensures we're using the forecast for ALL remaining flights
+        current_time = day * 24 + hour
+        time_end = TIME_HORIZON  # Plan for ALL remaining flights
+        
+        # Compute forecast for ALL remaining flights
+        demand_forecast = self._forecast_demand_window(current_time, time_end)
+        hub1_forecast = demand_forecast.get("HUB1", {})
+        
         purchases = {cls: 0 for cls in CLASS_NAMES}
+        hub1_stock = self.inventory.get("HUB1", {})
         
-        # In end-game, only buy if we're completely out of stock
-        # Don't buy anything in last 48 hours (lead times won't help)
-        hours_remaining = 720 - (day * 24 + hour)
+        # Account for pending purchases
+        pending_arrivals = defaultdict(int)
+        for arrival_time, purchases_dict in self.pending_purchases.items():
+            if arrival_time <= current_time + 48:
+                for cls, qty in purchases_dict.items():
+                    pending_arrivals[cls] += qty
         
-        if hours_remaining > 48:
-            # Last 72h but more than 48h remaining - only buy economy (12h lead time)
-            hub1_stock = self.inventory.get("HUB1", {})
-            if hub1_stock.get('economy', 0) < 50:  # Very low threshold
-                purchases['economy'] = min(100, 50)  # Small purchase
-                logger.info("End-game: Emergency economy kit purchase")
+        # VERY aggressive purchasing to cover ALL remaining flights
+        for class_name in CLASS_NAMES:
+            forecast_demand = hub1_forecast.get(class_name, 0)
+            current_stock = hub1_stock.get(class_name, 0)
+            pending = pending_arrivals.get(class_name, 0)
+            effective_stock = current_stock + pending
+            
+            # Target is exactly remaining demand (safety_factor_endgame = 1.0)
+            target_stock = int(forecast_demand * self.safety_factor_endgame)
+            
+            # Buy VERY aggressively - buy if below 95% of target
+            if effective_stock < target_stock * 0.95:
+                deficit = target_stock - effective_stock
+                purchase_qty = int(deficit * 1.0)  # Buy 100% of deficit
+                purchase_qty = ((purchase_qty + 9) // 10) * 10  # Round to nearest 10
+                
+                # Cap at API limits
+                max_purchase = 42000
+                if class_name == 'premiumEconomy':
+                    max_purchase = 1000
+                
+                purchase_qty = min(purchase_qty, max_purchase)
+                
+                if purchase_qty > 0:
+                    lead_time = KIT_TYPES[class_name]['lead_time']
+                    arrival_time = current_time + lead_time
+                    # Only buy if it will arrive before end of game
+                    if arrival_time < TIME_HORIZON:
+                        purchases[class_name] = purchase_qty
+                        self.pending_purchases[arrival_time][class_name] += purchase_qty
+                        logger.info(f"ENDGAME: Purchasing {purchase_qty} {class_name} kits "
+                                  f"(forecast: {forecast_demand}, current: {current_stock}, "
+                                  f"target: {target_stock}, arriving hour {arrival_time})")
         
-        # Don't buy anything else in end-game
         return purchases
     
     def _display_round_results(self, response: Dict, day: int, hour: int):
@@ -891,11 +980,11 @@ def main():
     # Setup logging
     setup_logging(log_to_file=not args.no_log_file, log_level=args.log_level)
     logger.info("=" * 60)
-    logger.info("Rotables Challenge - Stage 2 Solver (24h Lookahead)")
+    logger.info("Rotables Challenge - Stage 2.5 Solver (Penalty-aware with End-game Planning)")
     logger.info("=" * 60)
     logger.info(f"API Base URL: {args.base_url}")
-    logger.info(f"Lookahead: {args.lookahead}h")
-    logger.info(f"Safety Factor: {args.safety_factor}")
+    logger.info(f"Normal mode: Lookahead={args.lookahead}h, Safety={args.safety_factor}")
+    logger.info(f"End-game mode: Window={ENDGAME_WINDOW_HOURS}h, Safety={SAFETY_FACTOR_ENDGAME}")
     
     # Load data
     data_loader = DataLoader(args.resources_dir)
@@ -904,9 +993,11 @@ def main():
     api_client = ApiClient(base_url=args.base_url, api_key=args.api_key)
     
     # Create and run solver
-    solver = Stage2Solver(api_client, data_loader, 
+    solver = Stage2Solver(api_client, data_loader,
                          lookahead_hours=args.lookahead,
-                         safety_factor=args.safety_factor)
+                         endgame_window_hours=ENDGAME_WINDOW_HOURS,
+                         safety_factor_normal=args.safety_factor,
+                         safety_factor_endgame=SAFETY_FACTOR_ENDGAME)
     solver.solve()
 
 
