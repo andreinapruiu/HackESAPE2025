@@ -66,11 +66,11 @@ MAX_REPOSITION_DISTANCE = {
 # E1: Add premiumEconomy to repositioning (biggest penalty at €52K)
 REPOSITION_CLASSES = ['economy', 'business', 'premiumEconomy']
 # F2: OPTIMIZED - Dynamic reposition percentage based on game phase
-# Best found: 3%/2%/0.5% for economy saves €538K from baseline
+# Best found: 3%/2%/0.5% for economy even with 100% capacity margins
 REPOSITION_PERCENTAGE = {
-    'economy': {'early': 0.03, 'mid': 0.02, 'late': 0.005},  # Optimal
-    'business': {'early': 0.01, 'mid': 0.005, 'late': 0.00},  # Near zero
-    'premiumEconomy': {'early': 0.005, 'mid': 0.00, 'late': 0.00},  # Near zero
+    'economy': {'early': 0.03, 'mid': 0.02, 'late': 0.005},
+    'business': {'early': 0.01, 'mid': 0.005, 'late': 0.00},
+    'premiumEconomy': {'early': 0.005, 'mid': 0.00, 'late': 0.00},
 }
 
 # D3: End-game flight filtering - don't reposition for flights arriving in last 6 hours
@@ -79,7 +79,11 @@ END_GAME_ARRIVAL_CUTOFF = 714  # Hour 714 = Day 29, Hour 18 (last 6 hours)
 
 # Proactive purchasing parameters
 FORECAST_HOURS = 48
-PURCHASE_BUFFER = 1.1
+PURCHASE_BUFFER = 1.0  # Optimal
+
+# Under-loading tested: 95% = +€8.5M worse, 98% = +€6.5M worse
+# Actual passengers ≈ planned passengers in this dataset
+LOADING_FACTOR = 1.00  # Keep at 100%
 
 # ============================================================================
 # NEW: B3 - Class-specific capacity margins
@@ -103,7 +107,7 @@ CAPACITY_MARGINS = {
 # NEW: A4 - End-game drain parameters
 # ============================================================================
 # E3: Increase from 72h to 96h to further reduce remaining stock
-END_GAME_PURCHASE_CUTOFF = 96  # Hours before end to stop purchasing
+END_GAME_PURCHASE_CUTOFF = 200  # AGGRESSIVE - Stop purchasing earlier to reduce leftover stock
 END_GAME_REPOSITION_CUTOFF = 24  # Hours before end to stop repositioning
 
 # ============================================================================
@@ -697,7 +701,9 @@ class UltimateSolver:
                     max_on_aircraft = aircraft.get_kit_capacity(class_name)
                 
                 max_loadable = min(available_at_origin, space_at_dest, max_on_aircraft)
-                desired = pax
+                # NEW: Apply loading factor - load less than 100% of planned passengers
+                # This saves movement cost when actual passengers < planned
+                desired = int(pax * LOADING_FACTOR)
                 actual = min(desired, max_loadable)
                 loaded_kits[class_name] = actual
                 
