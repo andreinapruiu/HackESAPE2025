@@ -433,9 +433,35 @@ class ColleagueStyleSolver:
         except Exception as e:
             logger.exception(f"Unexpected error: {e}")
         finally:
+            # Explicitly end session and capture response
+            logger.info("=" * 60)
+            logger.info("Ending session...")
+            try:
+                end_response = self.api_client.end_session()
+                logger.info(f"END SESSION RESPONSE: {end_response}")
+                
+                # If end_response has useful data, use it for summary
+                if isinstance(end_response, dict):
+                    if 'totalCost' in end_response:
+                        self.last_response = end_response
+                    logger.info(f"Final Total Cost from end_session: €{end_response.get('totalCost', 'N/A'):,}")
+                    
+                    # Log all penalties from end response
+                    end_penalties = end_response.get('penalties', [])
+                    if end_penalties:
+                        logger.info(f"End-game penalties ({len(end_penalties)}):")
+                        for p in end_penalties[:10]:  # Log first 10
+                            logger.info(f"  - {p.get('penaltyType', 'UNKNOWN')}: €{p.get('penalty', 0):,.2f}")
+                        if len(end_penalties) > 10:
+                            logger.info(f"  ... and {len(end_penalties) - 10} more penalties")
+                else:
+                    logger.info(f"End session returned: {end_response}")
+                    
+            except Exception as e:
+                logger.warning(f"Could not end session: {e}")
+            
             if completed_all_rounds:
-                logger.info("=" * 60)
-                logger.info("Completed all 720 rounds - server will end session automatically")
+                logger.info("Completed all 720 rounds successfully")
             
             # Print comprehensive summary
             self._print_summary(self.last_response)
