@@ -86,16 +86,16 @@ PURCHASE_BUFFER = 1.1
 # ============================================================================
 CAPACITY_MARGINS = {
     'hub': {
-        'first': 0.70,
-        'business': 0.70,
-        'premiumEconomy': 0.70,
-        'economy': 0.70
+        'first': 1.00,    # 100% - no margin
+        'business': 1.00,  
+        'premiumEconomy': 1.00,  
+        'economy': 1.00   
     },
     'outstation': {
-        'first': 0.90,
-        'business': 0.90,
-        'premiumEconomy': 0.95,  # Higher margin for PE (was causing capacity-reduced)
-        'economy': 0.90
+        'first': 1.00,    
+        'business': 1.00,  
+        'premiumEconomy': 1.00,  
+        'economy': 1.00   
     }
 }
 
