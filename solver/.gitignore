@@ -8,7 +8,8 @@ venv/
 ENV/
 .venv
 *.log
-
+models/
+checkpoints/
 # Environment variables (keep .env.example)
 .env
 !.env.example

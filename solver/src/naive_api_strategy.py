@@ -719,3 +719,33 @@ def run_naive_strategy_with_api(api_url: str, api_key: str, data_warehouse: Data
     
     finally:
         api_client.close()
+
+
+if __name__ == "__main__":
+    import sys
+    import os
+    if len(sys.argv) < 3:
+        print("Usage: python naive_api_strategy.py <api_key> <base_url>")
+        sys.exit(1)
+    
+    api_key = sys.argv[1]
+    base_url = sys.argv[2]
+    
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(message)s'
+    )
+    
+    # Initialize data warehouse
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, '..', '..', 'eval-platform', 'src', 'main', 'resources', 'liquibase', 'data')
+    data_dir = os.path.abspath(data_dir)
+    
+    dw = DataWarehouse(data_dir)
+    dw.load_all_data()  # Load airports, aircraft types, and flight schedules
+    
+    # Run strategy
+    result = run_naive_strategy_with_api(base_url, api_key, dw)
+    final_cost = result.get('totalCost', 0)
+    print(f"\n✅ Session complete! Final cost: EUR {final_cost:,.2f}")
